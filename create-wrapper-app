@@ -1,0 +1,146 @@
+#!/usr/bin/python2.7
+
+from __future__ import print_function, with_statement
+import argparse
+from sys import exit
+import os.path
+import plistlib
+import shutil
+import uuid
+
+def find_app(paths, app_name):
+    """
+    Find application by its name.
+
+    Return full path to found application directory.
+    """
+    app_name_l = app_name.lower()
+    found = False
+    for path in paths:
+        for f in os.listdir(path):
+            full_path = os.path.join(path, f)
+            if not os.path.isdir(full_path):
+                continue
+            if not full_path.lower().endswith('.app'):
+                continue
+            if f.lower() == app_name_l:
+                found = full_path
+                break
+            if f.lower() == app_name_l+'.app':
+                found = full_path
+                break
+        if found != False:
+            break
+    return found
+
+def extract_app_icon(app_dir):
+    """
+    Return full path to application icon file (.icns-file) or False in case of any error
+    """
+    plist_file = os.path.join(app_dir, 'Contents', 'Info.plist')
+    plist = plistlib.readPlist(plist_file)
+    icns_name = plist.get('CFBundleIconFile', False)
+    if icns_name == False:
+        return False
+    else:
+        return os.path.join(app_dir, 'Contents', 'Resources', icns_name)
+
+def main():
+    SYS_APPLICATIONS_PATH = '/Applications/'
+    USER_APPLICATIONS_PATH = os.path.expanduser('~/Applications')
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-a', '--app', metavar='SRC_APP',
+        help='Application name, e.g. Firefox or Firefox.app or firefox.app')
+    parser.add_argument('-n', '--name', metavar='NEW_APP',
+        help='Name of new application, with or without ".app"')
+
+    args = parser.parse_args()
+
+    app = args.app
+    name = args.name
+
+    if not app:
+        print('"-a SRC_APP" argument is required')
+        exit(1)
+
+    if not name:
+        print('"-n NEW_APP" argument is required')
+        exit(1)
+
+    if app.find('/') > -1:
+        print('Incorrect application name')
+        exit(1)
+
+    if name.find('/') > -1:
+        print('Incorrect new application name')
+        exit(1)
+
+    if not name.lower().endswith('.app'):
+        name += '.app'
+
+    if os.path.exists(name):
+        print('Application "{0}" already exists'.format(name))
+        exit(1)
+
+    # try to find application
+    app_dir = find_app([SYS_APPLICATIONS_PATH, USER_APPLICATIONS_PATH], app)
+
+    if app_dir == False:
+        print('application not found')
+        exit(1)
+
+    icns = extract_app_icon(app_dir)
+
+    new_app_contents_path = os.path.join(name, 'Contents')
+    new_app_resources_path = os.path.join(new_app_contents_path, 'Resources')
+    new_app_macos_path = os.path.join(new_app_contents_path, 'MacOS')
+
+    os.mkdir(name, 0755)
+    os.mkdir(new_app_contents_path, 0755)
+    os.mkdir(new_app_resources_path, 0755)
+    os.mkdir(new_app_macos_path, 0755)
+
+    if icns != False:
+        shutil.copy(icns, os.path.join(new_app_resources_path, 'app.icns'))
+
+    # create runner script
+    runner_file = os.path.join(new_app_macos_path, 'runner')
+    with open(runner_file, 'w') as fp:
+        fp.write(RUNNER_TEMPLATE)
+
+    plist_file = os.path.join(new_app_contents_path, 'Info.plist')
+    with open(plist_file, 'w') as fp:
+        u = str(uuid.uuid4())
+        fp.write(PLIST_TEMPLATE.format(guid=u))
+
+    os.chmod(runner_file, 0755)
+
+    print(name)
+
+RUNNER_TEMPLATE = '''#!/usr/bin/python2.7
+
+print '123'
+'''
+
+PLIST_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>runner</string>
+  <key>CFBundleIconFile</key>
+  <string>app.icns</string>
+  <key>CFBundleSignature</key>
+  <string>????</string>
+  <key>CFBundleName</key>
+  <string>wrapper runner</string>
+  <key>CFBundleVersion</key>
+  <string></string>
+  <key>CFBundleIdentifier</key>
+  <string>macos-exec-runner-{guid}</string>
+</dict>
+</plist>
+'''
+if __name__ == '__main__':
+    main()
